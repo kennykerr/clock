@@ -7,9 +7,6 @@ struct __declspec(uuid("C67EA361-1863-4e69-89DB-695D3E9A5B6B")) Direct2DShadow;
 D2D1_COLOR_F const COLOR_WHITE = { 1.0f,  1.0f,  1.0f,  1.0f };
 D2D1_COLOR_F const COLOR_ORANGE = { 0.92f,  0.38f,  0.208f,  1.0f };
 
-BYTE const* BackgroundImage();
-UINT BackgroundImageSize();
-
 com_ptr<ID2D1Factory1> create_factory()
 {
     D2D1_FACTORY_OPTIONS fo = {};
@@ -334,24 +331,6 @@ struct SampleWindow :
         }
     }
 
-    void LoadBackgroundImage()
-    {
-        auto factory = create_instance<IWICImagingFactory>(CLSID_WICImagingFactory);
-
-        com_ptr<IWICStream> stream;
-        check_hresult(factory->CreateStream(stream.put()));
-        check_hresult(stream->InitializeFromMemory(const_cast<BYTE*>(BackgroundImage()), BackgroundImageSize()));
-
-        com_ptr<IWICBitmapDecoder> decoder;
-        check_hresult(factory->CreateDecoderFromStream(stream.get(), nullptr, WICDecodeMetadataCacheOnDemand, decoder.put()));
-
-        com_ptr<IWICBitmapFrameDecode> source;
-        check_hresult(decoder->GetFrame(0, source.put()));
-
-        check_hresult(factory->CreateFormatConverter(m_image.put()));
-        check_hresult(m_image->Initialize(source.get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeMedianCut));
-    }
-
     double GetTime() const
     {
         LARGE_INTEGER time;
@@ -392,14 +371,12 @@ struct SampleWindow :
             nullptr, 0,
             m_style.put()));
 
-        LoadBackgroundImage();
         ScheduleAnimation();
     }
 
     void ReleaseDeviceResources()
     {
         m_brush = nullptr;
-        m_bitmap = nullptr;
         m_clock = nullptr;
         m_shadow = nullptr;
     }
@@ -409,9 +386,6 @@ struct SampleWindow :
         check_hresult(m_target->CreateSolidColorBrush(COLOR_ORANGE,
             BrushProperties(0.8f),
             m_brush.put()));
-
-        check_hresult(m_target->CreateBitmapFromWicBitmap(m_image.get(),
-            m_bitmap.put()));
     }
 
     void CreateDeviceSizeResources()
@@ -512,7 +486,6 @@ struct SampleWindow :
 
         m_target->SetUnitMode(D2D1_UNIT_MODE_PIXELS);
         m_target->Clear(COLOR_WHITE);
-        m_target->DrawBitmap(m_bitmap.get());
         m_target->SetUnitMode(D2D1_UNIT_MODE_DIPS);
 
         com_ptr<ID2D1Image> previous;
@@ -546,8 +519,6 @@ struct SampleWindow :
     com_ptr<ID2D1StrokeStyle> m_style;
     com_ptr<ID2D1Effect> m_shadow;
     com_ptr<ID2D1Bitmap1> m_clock;
-    com_ptr<IWICFormatConverter> m_image;
-    com_ptr<ID2D1Bitmap> m_bitmap;
     com_ptr<IUIAnimationManager> m_manager;
     com_ptr<IUIAnimationVariable> m_variable;
     LARGE_INTEGER m_frequency;
