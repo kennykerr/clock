@@ -3,7 +3,14 @@
 using namespace winrt;
 using namespace D2D1;
 
-inline com_ptr<ID2D1Factory1> create_factory()
+struct __declspec(uuid("C67EA361-1863-4e69-89DB-695D3E9A5B6B")) Direct2DShadow;
+D2D1_COLOR_F const COLOR_WHITE = { 1.0f,  1.0f,  1.0f,  1.0f };
+D2D1_COLOR_F const COLOR_ORANGE = { 0.92f,  0.38f,  0.208f,  1.0f };
+
+BYTE const* BackgroundImage();
+UINT BackgroundImageSize();
+
+com_ptr<ID2D1Factory1> create_factory()
 {
     D2D1_FACTORY_OPTIONS fo = {};
 
@@ -13,14 +20,15 @@ inline com_ptr<ID2D1Factory1> create_factory()
 
     com_ptr<ID2D1Factory1> factory;
 
-    check_hresult(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
+    check_hresult(D2D1CreateFactory(
+        D2D1_FACTORY_TYPE_SINGLE_THREADED,
         fo,
         factory.put()));
 
     return factory;
 }
 
-inline HRESULT create_device(D3D_DRIVER_TYPE const type, com_ptr<ID3D11Device>& device)
+HRESULT create_device(D3D_DRIVER_TYPE const type, com_ptr<ID3D11Device>& device)
 {
     UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 
@@ -39,7 +47,7 @@ inline HRESULT create_device(D3D_DRIVER_TYPE const type, com_ptr<ID3D11Device>& 
         nullptr);
 }
 
-inline com_ptr<ID3D11Device> create_device()
+com_ptr<ID3D11Device> create_device()
 {
     com_ptr<ID3D11Device> device;
     auto hr = create_device(D3D_DRIVER_TYPE_HARDWARE, device);
@@ -53,7 +61,7 @@ inline com_ptr<ID3D11Device> create_device()
     return device;
 }
 
-inline com_ptr<ID2D1DeviceContext> create_render_target(
+com_ptr<ID2D1DeviceContext> create_render_target(
     com_ptr<ID2D1Factory1> const& factory,
     com_ptr<ID3D11Device> const& device)
 {
@@ -71,7 +79,7 @@ inline com_ptr<ID2D1DeviceContext> create_render_target(
     return target;
 }
 
-inline com_ptr<IDXGIFactory2> get_dxgi_factory(com_ptr<ID3D11Device> const& device)
+com_ptr<IDXGIFactory2> get_dxgi_factory(com_ptr<ID3D11Device> const& device)
 {
     auto dxdevice = device.as<IDXGIDevice>();
 
@@ -81,7 +89,7 @@ inline com_ptr<IDXGIFactory2> get_dxgi_factory(com_ptr<ID3D11Device> const& devi
     return capture<IDXGIFactory2>(adapter, &IDXGIAdapter::GetParent);
 }
 
-inline void create_swapchain_bitmap(
+void create_swapchain_bitmap(
     com_ptr<IDXGISwapChain1> const& swapchain,
     com_ptr<ID2D1DeviceContext> const& target)
 {
@@ -100,9 +108,8 @@ inline void create_swapchain_bitmap(
     target->SetTarget(bitmap.get());
 }
 
-template <typename T>
-struct DesktopWindow :
-    CWindowImpl<DesktopWindow<T>, CWindow, CWinTraits<WS_OVERLAPPEDWINDOW | WS_VISIBLE>>
+struct SampleWindow :
+    CWindowImpl<SampleWindow, CWindow, CWinTraits<WS_OVERLAPPEDWINDOW | WS_VISIBLE>>
 {
     DECLARE_WND_CLASS_EX(nullptr, 0, -1);
 
@@ -202,7 +209,7 @@ struct DesktopWindow :
             0))
         {
             create_swapchain_bitmap(m_swapChain, m_target);
-            static_cast<T*>(this)->CreateDeviceSizeResources();
+            CreateDeviceSizeResources();
         }
         else
         {
@@ -244,12 +251,12 @@ struct DesktopWindow :
 
             m_target->SetDpi(m_dpi, m_dpi);
 
-            static_cast<T*>(this)->CreateDeviceResources();
-            static_cast<T*>(this)->CreateDeviceSizeResources();
+            CreateDeviceResources();
+            CreateDeviceSizeResources();
         }
 
         m_target->BeginDraw();
-        static_cast<T*>(this)->Draw();
+        Draw();
         m_target->EndDraw();
 
         auto const hr = m_swapChain->Present(1, 0);
@@ -274,7 +281,7 @@ struct DesktopWindow :
         m_target = nullptr;
         m_swapChain = nullptr;
 
-        static_cast<T*>(this)->ReleaseDeviceResources();
+        ReleaseDeviceResources();
     }
 
     void Run()
@@ -287,7 +294,7 @@ struct DesktopWindow :
         float dpiY;
         m_factory->GetDesktopDpi(&m_dpi, &dpiY);
 
-        static_cast<T*>(this)->CreateDeviceIndependentResources();
+        CreateDeviceIndependentResources();
 
         RECT bounds = { 10, 10, 1010, 750 };
         check_bool(__super::Create(nullptr, bounds, L"Direct2D"));
@@ -326,48 +333,6 @@ struct DesktopWindow :
             }
         }
     }
-
-    void CreateDeviceIndependentResources() {}
-    void CreateDeviceResources() {}
-    void CreateDeviceSizeResources() {}
-    void ReleaseDeviceResources() {}
-
-    com_ptr<ID2D1Factory1> m_factory;
-    com_ptr<IDXGIFactory2> m_dxfactory;
-    com_ptr<ID2D1DeviceContext> m_target;
-    com_ptr<IDXGISwapChain1> m_swapChain;
-    float m_dpi;
-    bool m_visible;
-    DWORD m_occlusion;
-
-    DesktopWindow() :
-        m_dpi(0),
-        m_visible(true),
-        m_occlusion(0)
-    {
-    }
-};
-
-struct __declspec(uuid("C67EA361-1863-4e69-89DB-695D3E9A5B6B")) Direct2DShadow;
-D2D1_COLOR_F const COLOR_WHITE = { 1.0f,  1.0f,  1.0f,  1.0f };
-D2D1_COLOR_F const COLOR_ORANGE = { 0.92f,  0.38f,  0.208f,  1.0f };
-
-BYTE const* BackgroundImage();
-UINT BackgroundImageSize();
-
-template <typename T>
-struct ClockSample : T
-{
-    com_ptr<ID2D1SolidColorBrush> m_brush;
-    com_ptr<ID2D1StrokeStyle> m_style;
-    com_ptr<ID2D1Effect> m_shadow;
-    com_ptr<ID2D1Bitmap1> m_clock;
-    com_ptr<IWICFormatConverter> m_image;
-    com_ptr<ID2D1Bitmap> m_bitmap;
-    com_ptr<IUIAnimationManager> m_manager;
-    com_ptr<IUIAnimationVariable> m_variable;
-    LARGE_INTEGER m_frequency;
-    D2D1_MATRIX_3X2_F m_orientation;
 
     void LoadBackgroundImage()
     {
@@ -568,10 +533,25 @@ struct ClockSample : T
 
         m_target->DrawImage(m_clock.get());
     }
-};
 
-struct SampleWindow : ClockSample<DesktopWindow<SampleWindow>>
-{
+    float m_dpi{};
+    bool m_visible{};
+    DWORD m_occlusion{};
+
+    com_ptr<ID2D1Factory1> m_factory;
+    com_ptr<IDXGIFactory2> m_dxfactory;
+    com_ptr<ID2D1DeviceContext> m_target;
+    com_ptr<IDXGISwapChain1> m_swapChain;
+    com_ptr<ID2D1SolidColorBrush> m_brush;
+    com_ptr<ID2D1StrokeStyle> m_style;
+    com_ptr<ID2D1Effect> m_shadow;
+    com_ptr<ID2D1Bitmap1> m_clock;
+    com_ptr<IWICFormatConverter> m_image;
+    com_ptr<ID2D1Bitmap> m_bitmap;
+    com_ptr<IUIAnimationManager> m_manager;
+    com_ptr<IUIAnimationVariable> m_variable;
+    LARGE_INTEGER m_frequency;
+    D2D1_MATRIX_3X2_F m_orientation;
 };
 
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
