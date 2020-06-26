@@ -1,75 +1,9 @@
 #include "Precompiled.h"
 
-namespace wrl = Microsoft::WRL;
-namespace d2d = D2D1;
+using namespace winrt;
+using namespace D2D1;
 
-#define ASSERT(expression) _ASSERTE(expression)
-
-#ifdef _DEBUG
-
-#define VERIFY(expression) ASSERT(expression)
-#define HR(expression) ASSERT(S_OK == (expression))
-
-inline void TRACE(WCHAR const* const format, ...)
-{
-    va_list args;
-    va_start(args, format);
-
-    WCHAR output[512];
-    vswprintf_s(output, format, args);
-
-    OutputDebugString(output);
-
-    va_end(args);
-}
-
-#else
-
-#define VERIFY(expression) (expression)
-
-struct ComException
-{
-    HRESULT const hr;
-    ComException(HRESULT const value) : hr(value) {}
-};
-
-inline void HR(HRESULT const hr)
-{
-    if (S_OK != hr) throw ComException(hr);
-}
-
-#define TRACE __noop
-
-#endif
-
-struct AutoCoInitialize
-{
-    AutoCoInitialize()
-    {
-        HR(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
-    }
-
-    ~AutoCoInitialize()
-    {
-        CoUninitialize();
-    }
-};
-
-template <typename T>
-wrl::ComPtr<T> CreateInstance(REFCLSID clsid, DWORD const context = CLSCTX_INPROC_SERVER)
-{
-    wrl::ComPtr<T> instance;
-
-    HR(CoCreateInstance(clsid,
-        nullptr,
-        context,
-        __uuidof(T),
-        reinterpret_cast<void**>(instance.GetAddressOf())));
-
-    return instance;
-}
-
-inline wrl::ComPtr<ID2D1Factory1> CreateFactory()
+inline com_ptr<ID2D1Factory1> create_factory()
 {
     D2D1_FACTORY_OPTIONS fo = {};
 
@@ -77,19 +11,17 @@ inline wrl::ComPtr<ID2D1Factory1> CreateFactory()
     fo.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
 #endif
 
-    wrl::ComPtr<ID2D1Factory1> factory;
+    com_ptr<ID2D1Factory1> factory;
 
-    HR(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
+    check_hresult(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
         fo,
-        factory.GetAddressOf()));
+        factory.put()));
 
     return factory;
 }
 
-inline HRESULT CreateDevice(D3D_DRIVER_TYPE const type, wrl::ComPtr<ID3D11Device>& device)
+inline HRESULT create_device(D3D_DRIVER_TYPE const type, com_ptr<ID3D11Device>& device)
 {
-    ASSERT(!device);
-
     UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 
 #ifdef _DEBUG
@@ -102,90 +34,70 @@ inline HRESULT CreateDevice(D3D_DRIVER_TYPE const type, wrl::ComPtr<ID3D11Device
         flags,
         nullptr, 0,
         D3D11_SDK_VERSION,
-        device.GetAddressOf(),
+        device.put(),
         nullptr,
         nullptr);
 }
 
-inline wrl::ComPtr<ID3D11Device> CreateDevice()
+inline com_ptr<ID3D11Device> create_device()
 {
-    wrl::ComPtr<ID3D11Device> device;
-
-    auto hr = CreateDevice(D3D_DRIVER_TYPE_HARDWARE, device);
+    com_ptr<ID3D11Device> device;
+    auto hr = create_device(D3D_DRIVER_TYPE_HARDWARE, device);
 
     if (DXGI_ERROR_UNSUPPORTED == hr)
     {
-        hr = CreateDevice(D3D_DRIVER_TYPE_WARP, device);
+        hr = create_device(D3D_DRIVER_TYPE_WARP, device);
     }
 
-    HR(hr);
-
+    check_hresult(hr);
     return device;
 }
 
-inline wrl::ComPtr<ID2D1DeviceContext> CreateRenderTarget(wrl::ComPtr<ID2D1Factory1> const& factory,
-    wrl::ComPtr<ID3D11Device> const& device)
+inline com_ptr<ID2D1DeviceContext> create_render_target(
+    com_ptr<ID2D1Factory1> const& factory,
+    com_ptr<ID3D11Device> const& device)
 {
-    ASSERT(factory);
-    ASSERT(device);
+    auto dxdevice = device.as<IDXGIDevice>();
 
-    wrl::ComPtr<IDXGIDevice> dxdevice;
-    HR(device.As(&dxdevice));
+    com_ptr<ID2D1Device> d2device;
+    check_hresult(factory->CreateDevice(dxdevice.get(), d2device.put()));
 
-    wrl::ComPtr<ID2D1Device> d2device;
+    com_ptr<ID2D1DeviceContext> target;
 
-    HR(factory->CreateDevice(dxdevice.Get(),
-        d2device.GetAddressOf()));
-
-    wrl::ComPtr<ID2D1DeviceContext> target;
-
-    HR(d2device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
-        target.GetAddressOf()));
+    check_hresult(d2device->CreateDeviceContext(
+        D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+        target.put()));
 
     return target;
 }
 
-inline wrl::ComPtr<IDXGIFactory2> GetDxgiFactory(wrl::ComPtr<ID3D11Device> const& device)
+inline com_ptr<IDXGIFactory2> get_dxgi_factory(com_ptr<ID3D11Device> const& device)
 {
-    ASSERT(device);
+    auto dxdevice = device.as<IDXGIDevice>();
 
-    wrl::ComPtr<IDXGIDevice> dxdevice;
-    HR(device.As(&dxdevice));
+    com_ptr<IDXGIAdapter> adapter;
+    check_hresult(dxdevice->GetAdapter(adapter.put()));
 
-    wrl::ComPtr<IDXGIAdapter> adapter;
-    HR(dxdevice->GetAdapter(adapter.GetAddressOf()));
-
-    wrl::ComPtr<IDXGIFactory2> factory;
-
-    HR(adapter->GetParent(__uuidof(factory),
-        reinterpret_cast<void**>(factory.GetAddressOf())));
-
-    return factory;
+    return capture<IDXGIFactory2>(adapter, &IDXGIAdapter::GetParent);
 }
 
-inline void CreateDeviceSwapChainBitmap(wrl::ComPtr<IDXGISwapChain1> const& swapchain,
-    wrl::ComPtr<ID2D1DeviceContext> const& target)
+inline void create_swapchain_bitmap(
+    com_ptr<IDXGISwapChain1> const& swapchain,
+    com_ptr<ID2D1DeviceContext> const& target)
 {
-    ASSERT(swapchain);
-    ASSERT(target);
+    auto surface = capture<IDXGISurface>(swapchain, &IDXGISwapChain1::GetBuffer, 0);
 
-    wrl::ComPtr<IDXGISurface> surface;
-
-    HR(swapchain->GetBuffer(0,
-        __uuidof(surface),
-        reinterpret_cast<void**>(surface.GetAddressOf())));
-
-    auto const props = d2d::BitmapProperties1(
+    auto props = BitmapProperties1(
         D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-        d2d::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
+        PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
 
-    wrl::ComPtr<ID2D1Bitmap1> bitmap;
+    com_ptr<ID2D1Bitmap1> bitmap;
 
-    HR(target->CreateBitmapFromDxgiSurface(surface.Get(),
+    check_hresult(target->CreateBitmapFromDxgiSurface(surface.get(),
         props,
-        bitmap.GetAddressOf()));
+        bitmap.put()));
 
-    target->SetTarget(bitmap.Get());
+    target->SetTarget(bitmap.get());
 }
 
 template <typename T>
@@ -208,7 +120,7 @@ struct DesktopWindow :
     LRESULT PaintHandler(UINT, WPARAM, LPARAM, BOOL&)
     {
         PAINTSTRUCT ps;
-        VERIFY(BeginPaint(&ps));
+        check_bool(BeginPaint(&ps));
 
         Render();
 
@@ -242,8 +154,6 @@ struct DesktopWindow :
 
     LRESULT OcclusionHandler(UINT, WPARAM, LPARAM, BOOL&)
     {
-        ASSERT(m_occlusion);
-
         if (S_OK == m_swapChain->Present(0, DXGI_PRESENT_TEST))
         {
             m_dxfactory->UnregisterOcclusionStatus(m_occlusion);
@@ -284,9 +194,6 @@ struct DesktopWindow :
 
     void ResizeSwapChainBitmap()
     {
-        ASSERT(m_target);
-        ASSERT(m_swapChain);
-
         m_target->SetTarget(nullptr);
 
         if (S_OK == m_swapChain->ResizeBuffers(0,
@@ -294,7 +201,7 @@ struct DesktopWindow :
             DXGI_FORMAT_UNKNOWN,
             0))
         {
-            CreateDeviceSwapChainBitmap(m_swapChain, m_target);
+            create_swapchain_bitmap(m_swapChain, m_target);
             static_cast<T*>(this)->CreateDeviceSizeResources();
         }
         else
@@ -303,12 +210,9 @@ struct DesktopWindow :
         }
     }
 
-    static wrl::ComPtr<IDXGISwapChain1> CreateSwapChainForHwnd(wrl::ComPtr<ID3D11Device> const& device, HWND window)
+    static com_ptr<IDXGISwapChain1> CreateSwapChainForHwnd(com_ptr<ID3D11Device> const& device, HWND window)
     {
-        ASSERT(device);
-        ASSERT(window);
-
-        auto const factory = GetDxgiFactory(device);
+        auto const factory = get_dxgi_factory(device);
 
         DXGI_SWAP_CHAIN_DESC1 props = {};
         props.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -317,14 +221,14 @@ struct DesktopWindow :
         props.BufferCount = 2;
         props.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
 
-        wrl::ComPtr<IDXGISwapChain1> swapChain;
+        com_ptr<IDXGISwapChain1> swapChain;
 
-        HR(factory->CreateSwapChainForHwnd(device.Get(),
+        check_hresult(factory->CreateSwapChainForHwnd(device.get(),
             window,
             &props,
             nullptr,
             nullptr,
-            swapChain.GetAddressOf()));
+            swapChain.put()));
 
         return swapChain;
     }
@@ -333,10 +237,10 @@ struct DesktopWindow :
     {
         if (!m_target)
         {
-            auto device = CreateDevice();
-            m_target = CreateRenderTarget(m_factory, device);
+            auto device = create_device();
+            m_target = create_render_target(m_factory, device);
             m_swapChain = CreateSwapChainForHwnd(device, m_hWnd);
-            CreateDeviceSwapChainBitmap(m_swapChain, m_target);
+            create_swapchain_bitmap(m_swapChain, m_target);
 
             m_target->SetDpi(m_dpi, m_dpi);
 
@@ -356,7 +260,7 @@ struct DesktopWindow :
         }
         else if (DXGI_STATUS_OCCLUDED == hr)
         {
-            HR(m_dxfactory->RegisterOcclusionStatusWindow(m_hWnd, WM_USER, &m_occlusion));
+            check_hresult(m_dxfactory->RegisterOcclusionStatusWindow(m_hWnd, WM_USER, &m_occlusion));
             m_visible = false;
         }
         else
@@ -367,18 +271,18 @@ struct DesktopWindow :
 
     void ReleaseDevice()
     {
-        m_target.Reset();
-        m_swapChain.Reset();
+        m_target = nullptr;
+        m_swapChain = nullptr;
 
         static_cast<T*>(this)->ReleaseDeviceResources();
     }
 
     void Run()
     {
-        m_factory = CreateFactory();
+        m_factory = create_factory();
 
-        HR(CreateDXGIFactory1(__uuidof(m_dxfactory),
-            reinterpret_cast<void**>(m_dxfactory.GetAddressOf())));
+        check_hresult(CreateDXGIFactory1(__uuidof(m_dxfactory),
+            reinterpret_cast<void**>(m_dxfactory.put())));
 
         float dpiY;
         m_factory->GetDesktopDpi(&m_dpi, &dpiY);
@@ -386,9 +290,9 @@ struct DesktopWindow :
         static_cast<T*>(this)->CreateDeviceIndependentResources();
 
         RECT bounds = { 10, 10, 1010, 750 };
-        VERIFY(__super::Create(nullptr, bounds, L"Direct2D"));
+        check_bool(__super::Create(nullptr, bounds, L"Direct2D"));
 
-        VERIFY(RegisterPowerSettingNotification(m_hWnd,
+        check_bool(RegisterPowerSettingNotification(m_hWnd,
             &GUID_SESSION_DISPLAY_STATUS,
             DEVICE_NOTIFY_WINDOW_HANDLE));
 
@@ -428,10 +332,10 @@ struct DesktopWindow :
     void CreateDeviceSizeResources() {}
     void ReleaseDeviceResources() {}
 
-    wrl::ComPtr<ID2D1Factory1> m_factory;
-    wrl::ComPtr<IDXGIFactory2> m_dxfactory;
-    wrl::ComPtr<ID2D1DeviceContext> m_target;
-    wrl::ComPtr<IDXGISwapChain1> m_swapChain;
+    com_ptr<ID2D1Factory1> m_factory;
+    com_ptr<IDXGIFactory2> m_dxfactory;
+    com_ptr<ID2D1DeviceContext> m_target;
+    com_ptr<IDXGISwapChain1> m_swapChain;
     float m_dpi;
     bool m_visible;
     DWORD m_occlusion;
@@ -454,62 +358,62 @@ UINT BackgroundImageSize();
 template <typename T>
 struct ClockSample : T
 {
-    wrl::ComPtr<ID2D1SolidColorBrush> m_brush;
-    wrl::ComPtr<ID2D1StrokeStyle> m_style;
-    wrl::ComPtr<ID2D1Effect> m_shadow;
-    wrl::ComPtr<ID2D1Bitmap1> m_clock;
-    wrl::ComPtr<IWICFormatConverter> m_image;
-    wrl::ComPtr<ID2D1Bitmap> m_bitmap;
-    wrl::ComPtr<IUIAnimationManager> m_manager;
-    wrl::ComPtr<IUIAnimationVariable> m_variable;
+    com_ptr<ID2D1SolidColorBrush> m_brush;
+    com_ptr<ID2D1StrokeStyle> m_style;
+    com_ptr<ID2D1Effect> m_shadow;
+    com_ptr<ID2D1Bitmap1> m_clock;
+    com_ptr<IWICFormatConverter> m_image;
+    com_ptr<ID2D1Bitmap> m_bitmap;
+    com_ptr<IUIAnimationManager> m_manager;
+    com_ptr<IUIAnimationVariable> m_variable;
     LARGE_INTEGER m_frequency;
     D2D1_MATRIX_3X2_F m_orientation;
 
     void LoadBackgroundImage()
     {
-        auto factory = CreateInstance<IWICImagingFactory>(CLSID_WICImagingFactory);
+        auto factory = create_instance<IWICImagingFactory>(CLSID_WICImagingFactory);
 
-        wrl::ComPtr<IWICStream> stream;
-        HR(factory->CreateStream(stream.GetAddressOf()));
-        HR(stream->InitializeFromMemory(const_cast<BYTE*>(BackgroundImage()), BackgroundImageSize()));
+        com_ptr<IWICStream> stream;
+        check_hresult(factory->CreateStream(stream.put()));
+        check_hresult(stream->InitializeFromMemory(const_cast<BYTE*>(BackgroundImage()), BackgroundImageSize()));
 
-        wrl::ComPtr<IWICBitmapDecoder> decoder;
-        HR(factory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnDemand, decoder.GetAddressOf()));
+        com_ptr<IWICBitmapDecoder> decoder;
+        check_hresult(factory->CreateDecoderFromStream(stream.get(), nullptr, WICDecodeMetadataCacheOnDemand, decoder.put()));
 
-        wrl::ComPtr<IWICBitmapFrameDecode> source;
-        HR(decoder->GetFrame(0, source.GetAddressOf()));
+        com_ptr<IWICBitmapFrameDecode> source;
+        check_hresult(decoder->GetFrame(0, source.put()));
 
-        HR(factory->CreateFormatConverter(m_image.GetAddressOf()));
-        HR(m_image->Initialize(source.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeMedianCut));
+        check_hresult(factory->CreateFormatConverter(m_image.put()));
+        check_hresult(m_image->Initialize(source.get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeMedianCut));
     }
 
     double GetTime() const
     {
         LARGE_INTEGER time;
-        VERIFY(QueryPerformanceCounter(&time));
+        check_bool(QueryPerformanceCounter(&time));
 
         return static_cast<double>(time.QuadPart) / m_frequency.QuadPart;
     }
 
     void ScheduleAnimation()
     {
-        m_manager = CreateInstance<IUIAnimationManager>(__uuidof(UIAnimationManager));
-        auto library = CreateInstance<IUIAnimationTransitionLibrary>(__uuidof(UIAnimationTransitionLibrary));
-        VERIFY(QueryPerformanceFrequency(&m_frequency));
+        m_manager = create_instance<IUIAnimationManager>(__uuidof(UIAnimationManager));
+        auto library = create_instance<IUIAnimationTransitionLibrary>(__uuidof(UIAnimationTransitionLibrary));
+        check_bool(QueryPerformanceFrequency(&m_frequency));
 
-        wrl::ComPtr<IUIAnimationTransition> transition;
+        com_ptr<IUIAnimationTransition> transition;
 
-        HR(library->CreateAccelerateDecelerateTransition(
+        check_hresult(library->CreateAccelerateDecelerateTransition(
             5.0,
             1.0,
             0.2,
             0.8,
-            transition.GetAddressOf()));
+            transition.put()));
 
-        HR(m_manager->CreateAnimationVariable(0.0, m_variable.GetAddressOf()));
+        check_hresult(m_manager->CreateAnimationVariable(0.0, m_variable.put()));
 
-        HR(m_manager->ScheduleTransition(m_variable.Get(),
-            transition.Get(),
+        check_hresult(m_manager->ScheduleTransition(m_variable.get(),
+            transition.get(),
             GetTime()));
     }
 
@@ -519,11 +423,9 @@ struct ClockSample : T
         style.startCap = D2D1_CAP_STYLE_ROUND;
         style.endCap = D2D1_CAP_STYLE_TRIANGLE;
 
-        ASSERT(!m_style);
-
-        HR(m_factory->CreateStrokeStyle(style,
+        check_hresult(m_factory->CreateStrokeStyle(style,
             nullptr, 0,
-            m_style.GetAddressOf()));
+            m_style.put()));
 
         LoadBackgroundImage();
         ScheduleAnimation();
@@ -531,42 +433,46 @@ struct ClockSample : T
 
     void ReleaseDeviceResources()
     {
-        m_brush.Reset();
-        m_bitmap.Reset();
-        m_clock.Reset();
-        m_shadow.Reset();
+        m_brush = nullptr;
+        m_bitmap = nullptr;
+        m_clock = nullptr;
+        m_shadow = nullptr;
     }
 
     void CreateDeviceResources()
     {
-        HR(m_target->CreateSolidColorBrush(COLOR_ORANGE,
-            d2d::BrushProperties(0.8f),
-            m_brush.GetAddressOf()));
+        check_hresult(m_target->CreateSolidColorBrush(COLOR_ORANGE,
+            BrushProperties(0.8f),
+            m_brush.put()));
 
-        HR(m_target->CreateBitmapFromWicBitmap(m_image.Get(),
-            m_bitmap.GetAddressOf()));
+        check_hresult(m_target->CreateBitmapFromWicBitmap(m_image.get(),
+            m_bitmap.put()));
     }
 
     void CreateDeviceSizeResources()
     {
         auto sizeF = m_target->GetSize();
 
-        auto sizeU = d2d::SizeU(static_cast<UINT>(sizeF.width * m_dpi / 96.0f),
+        auto sizeU = SizeU(static_cast<UINT>(sizeF.width * m_dpi / 96.0f),
             static_cast<UINT>(sizeF.height * m_dpi / 96.0f));
 
-        auto props = d2d::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
-            d2d::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+        auto props = BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+            PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
             m_dpi, m_dpi);
 
-        HR(m_target->CreateBitmap(sizeU,
+        m_clock = nullptr;
+
+        check_hresult(m_target->CreateBitmap(sizeU,
             nullptr, 0,
             props,
-            m_clock.ReleaseAndGetAddressOf()));
+            m_clock.put()));
 
-        HR(m_target->CreateEffect(__uuidof(Direct2DShadow),
-            m_shadow.ReleaseAndGetAddressOf()));
+        m_shadow = nullptr;
 
-        m_shadow->SetInput(0, m_clock.Get());
+        check_hresult(m_target->CreateEffect(__uuidof(Direct2DShadow),
+            m_shadow.put()));
+
+        m_shadow->SetInput(0, m_clock.get());
 
     }
 
@@ -574,13 +480,13 @@ struct ClockSample : T
     {
         auto size = m_target->GetSize();
         auto radius = std::max(200.0f, std::min(size.width, size.height)) / 2.0f - 50.0f;
-        auto const offset = d2d::SizeF(2.0f, 2.0f);
-        auto translation = d2d::Matrix3x2F::Translation(size.width / offset.width, size.height / offset.height);
+        auto const offset = SizeF(2.0f, 2.0f);
+        auto translation = Matrix3x2F::Translation(size.width / offset.width, size.height / offset.height);
 
         m_target->SetTransform(translation);
 
-        m_target->DrawEllipse(d2d::Ellipse(d2d::Point2F(), radius, radius),
-            m_brush.Get(),
+        m_target->DrawEllipse(Ellipse(Point2F(), radius, radius),
+            m_brush.get(),
             radius / 20.f);
 
         SYSTEMTIME time;
@@ -591,7 +497,7 @@ struct ClockSample : T
         auto hourAngle = time.wHour % 12 * 30.0f + minuteAngle / 12.0f;
 
         double swing;
-        HR(m_variable->GetValue(&swing));
+        check_hresult(m_variable->GetValue(&swing));
 
         if (1.0 > swing)
         {
@@ -608,59 +514,59 @@ struct ClockSample : T
             hourAngle *= static_cast<float>(swing);
         }
 
-        m_target->SetTransform(d2d::Matrix3x2F::Rotation(secondAngle) * m_orientation * translation);
+        m_target->SetTransform(Matrix3x2F::Rotation(secondAngle) * m_orientation * translation);
 
-        m_target->DrawLine(d2d::Point2F(),
-            d2d::Point2F(0.0f, -(radius * 0.75f)),
-            m_brush.Get(),
+        m_target->DrawLine(Point2F(),
+            Point2F(0.0f, -(radius * 0.75f)),
+            m_brush.get(),
             radius / 25.f,
-            m_style.Get());
+            m_style.get());
 
-        m_target->SetTransform(d2d::Matrix3x2F::Rotation(minuteAngle) * m_orientation * translation);
+        m_target->SetTransform(Matrix3x2F::Rotation(minuteAngle) * m_orientation * translation);
 
-        m_target->DrawLine(d2d::Point2F(),
-            d2d::Point2F(0.0f, -(radius * 0.75f)),
-            m_brush.Get(),
+        m_target->DrawLine(Point2F(),
+            Point2F(0.0f, -(radius * 0.75f)),
+            m_brush.get(),
             radius / 15.0f,
-            m_style.Get());
+            m_style.get());
 
-        m_target->SetTransform(d2d::Matrix3x2F::Rotation(hourAngle) * m_orientation * translation);
+        m_target->SetTransform(Matrix3x2F::Rotation(hourAngle) * m_orientation * translation);
 
-        m_target->DrawLine(d2d::Point2F(),
-            d2d::Point2F(0.0f, -(radius * 0.5f)),
-            m_brush.Get(),
+        m_target->DrawLine(Point2F(),
+            Point2F(0.0f, -(radius * 0.5f)),
+            m_brush.get(),
             radius / 10.0f,
-            m_style.Get());
+            m_style.get());
     }
 
     void Draw()
     {
-        m_orientation = d2d::Matrix3x2F::Identity();
-        auto offset = d2d::SizeF(5.0f, 5.0f);
-        HR(m_manager->Update(GetTime()));
+        m_orientation = Matrix3x2F::Identity();
+        auto offset = SizeF(5.0f, 5.0f);
+        check_hresult(m_manager->Update(GetTime()));
 
         m_target->SetUnitMode(D2D1_UNIT_MODE_PIXELS);
         m_target->Clear(COLOR_WHITE);
-        m_target->DrawBitmap(m_bitmap.Get());
+        m_target->DrawBitmap(m_bitmap.get());
         m_target->SetUnitMode(D2D1_UNIT_MODE_DIPS);
 
-        wrl::ComPtr<ID2D1Image> previous;
-        m_target->GetTarget(previous.GetAddressOf());
+        com_ptr<ID2D1Image> previous;
+        m_target->GetTarget(previous.put());
 
-        m_target->SetTarget(m_clock.Get());
+        m_target->SetTarget(m_clock.get());
         m_target->Clear();
         DrawClock();
 
-        m_target->SetTarget(previous.Get());
-        m_target->SetTransform(d2d::Matrix3x2F::Translation(offset));
+        m_target->SetTarget(previous.get());
+        m_target->SetTransform(Matrix3x2F::Translation(offset));
 
-        m_target->DrawImage(m_shadow.Get(),
+        m_target->DrawImage(m_shadow.get(),
             D2D1_INTERPOLATION_MODE_LINEAR,
             D2D1_COMPOSITE_MODE_SOURCE_OVER);
 
-        m_target->SetTransform(d2d::Matrix3x2F::Identity());
+        m_target->SetTransform(Matrix3x2F::Identity());
 
-        m_target->DrawImage(m_clock.Get());
+        m_target->DrawImage(m_clock.get());
     }
 };
 
@@ -670,7 +576,7 @@ struct SampleWindow : ClockSample<DesktopWindow<SampleWindow>>
 
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
-    AutoCoInitialize oldschool;
+    init_apartment(apartment_type::single_threaded);
 
     SampleWindow window;
     window.Run();
