@@ -1,8 +1,9 @@
-#include "Precompiled.h"
+#include "pch.h"
 
 using namespace winrt;
 using namespace D2D1;
 
+extern "C" IMAGE_DOS_HEADER __ImageBase;
 struct __declspec(uuid("C67EA361-1863-4e69-89DB-695D3E9A5B6B")) Direct2DShadow;
 D2D1_COLOR_F const COLOR_WHITE = { 1.0f,  1.0f,  1.0f,  1.0f };
 D2D1_COLOR_F const COLOR_ORANGE = { 0.92f,  0.38f,  0.208f,  1.0f };
@@ -105,98 +106,128 @@ void create_swapchain_bitmap(
     target->SetTarget(bitmap.get());
 }
 
-struct SampleWindow :
-    CWindowImpl<SampleWindow, CWindow, CWinTraits<WS_OVERLAPPEDWINDOW | WS_VISIBLE>>
+struct Window
 {
-    DECLARE_WND_CLASS_EX(nullptr, 0, -1);
+    HWND m_window{};
 
-    BEGIN_MSG_MAP(c)
-        MESSAGE_HANDLER(WM_PAINT, PaintHandler)
-        MESSAGE_HANDLER(WM_SIZE, SizeHandler)
-        MESSAGE_HANDLER(WM_DISPLAYCHANGE, DisplayChangeHandler)
-        MESSAGE_HANDLER(WM_USER, OcclusionHandler)
-        MESSAGE_HANDLER(WM_POWERBROADCAST, PowerHandler)
-        MESSAGE_HANDLER(WM_ACTIVATE, ActivateHandler)
-        MESSAGE_HANDLER(WM_GETMINMAXINFO, GetMinMaxInfoHandler)
-        MESSAGE_HANDLER(WM_DESTROY, DestroyHandler)
-    END_MSG_MAP()
-
-    LRESULT PaintHandler(UINT, WPARAM, LPARAM, BOOL&)
+    Window()
     {
-        PAINTSTRUCT ps;
-        check_bool(BeginPaint(&ps));
+        WNDCLASS wc{};
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        wc.hInstance = reinterpret_cast<HINSTANCE>(&__ImageBase);
+        wc.lpszClassName = L"Sample";
+        wc.style = CS_HREDRAW | CS_VREDRAW;
+        wc.lpfnWndProc = window_proc;
+        RegisterClass(&wc);
+        WINRT_ASSERT(!m_window);
 
-        Render();
+        WINRT_VERIFY(CreateWindow(wc.lpszClassName,
+            L"Sample",
+            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+            nullptr, nullptr, wc.hInstance, this));
 
-        EndPaint(&ps);
-
-        return 0;
+        WINRT_ASSERT(m_window);
     }
 
-    LRESULT DisplayChangeHandler(UINT, WPARAM, LPARAM, BOOL&)
+    static LRESULT __stdcall window_proc(HWND const window, UINT const message, WPARAM const wparam, LPARAM const lparam) noexcept
     {
-        Render();
-        return 0;
-    }
+        WINRT_ASSERT(window);
 
-    LRESULT DestroyHandler(UINT, WPARAM, LPARAM, BOOL&)
-    {
-        PostQuitMessage(0);
-        return 0;
-    }
-
-    LRESULT SizeHandler(UINT, WPARAM wparam, LPARAM, BOOL&)
-    {
-        if (m_target && SIZE_MINIMIZED != wparam)
+        if (WM_NCCREATE == message)
         {
-            ResizeSwapChainBitmap();
-            Render();
+            auto cs = reinterpret_cast<CREATESTRUCT*>(lparam);
+            auto that = static_cast<Window*>(cs->lpCreateParams);
+            WINRT_ASSERT(that);
+            WINRT_ASSERT(!that->m_window);
+            that->m_window = window;
+            SetWindowLongPtr(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(that));
+        }
+        else if (auto that = reinterpret_cast<Window*>(GetWindowLongPtr(window, GWLP_USERDATA)))
+        {
+            return that->message_handler(message, wparam, lparam);
         }
 
-        return 0;
+        return DefWindowProc(window, message, wparam, lparam);
     }
 
-    LRESULT OcclusionHandler(UINT, WPARAM, LPARAM, BOOL&)
+    LRESULT message_handler(UINT const message, WPARAM const wparam, LPARAM const lparam) noexcept
     {
-        if (S_OK == m_swapChain->Present(0, DXGI_PRESENT_TEST))
+        if (WM_DESTROY == message)
         {
-            m_dxfactory->UnregisterOcclusionStatus(m_occlusion);
-            m_occlusion = 0;
-            m_visible = true;
+            PostQuitMessage(0);
+            return 0;
         }
 
-        return 0;
-    }
-
-    LRESULT PowerHandler(UINT, WPARAM, LPARAM lparam, BOOL&)
-    {
-        auto const ps = reinterpret_cast<POWERBROADCAST_SETTING*>(lparam);
-        m_visible = 0 != *reinterpret_cast<DWORD const*>(ps->Data);
-
-        if (m_visible)
+        if (WM_PAINT == message)
         {
-            PostMessage(WM_NULL);
+            PAINTSTRUCT ps;
+            check_bool(BeginPaint(m_window, &ps));
+            render();
+            EndPaint(m_window, &ps);
+            return 0;
         }
 
-        return TRUE;
+        if (WM_SIZE == message)
+        {
+            if (m_target && SIZE_MINIMIZED != wparam)
+            {
+                resize_swapchain_bitmap();
+                render();
+            }
+
+            return 0;
+        }
+
+        if (WM_DISPLAYCHANGE == message)
+        {
+            render();
+            return 0;
+        }
+
+        if (WM_USER == message)
+        {
+            if (S_OK == m_swapChain->Present(0, DXGI_PRESENT_TEST))
+            {
+                m_dxfactory->UnregisterOcclusionStatus(m_occlusion);
+                m_occlusion = 0;
+                m_visible = true;
+            }
+
+            return 0;
+        }
+
+        if (WM_POWERBROADCAST == message)
+        {
+            auto const ps = reinterpret_cast<POWERBROADCAST_SETTING*>(lparam);
+            m_visible = 0 != *reinterpret_cast<DWORD const*>(ps->Data);
+
+            if (m_visible)
+            {
+                PostMessage(m_window, WM_NULL, 0, 0);
+            }
+
+            return TRUE;
+        }
+
+        if (WM_ACTIVATE == message)
+        {
+            m_visible = !HIWORD(wparam);
+            return 0;
+        }
+
+        if (WM_GETMINMAXINFO == message)
+        {
+            auto info = reinterpret_cast<MINMAXINFO*>(lparam);
+            info->ptMinTrackSize.y = 200;
+
+            return 0;
+        }
+
+        return DefWindowProc(m_window, message, wparam, lparam);
     }
 
-    LRESULT ActivateHandler(UINT, WPARAM wparam, LPARAM, BOOL&)
-    {
-        m_visible = !HIWORD(wparam);
-
-        return 0;
-    }
-
-    LRESULT GetMinMaxInfoHandler(UINT, WPARAM, LPARAM lparam, BOOL&)
-    {
-        auto info = reinterpret_cast<MINMAXINFO*>(lparam);
-        info->ptMinTrackSize.y = 200;
-
-        return 0;
-    }
-
-    void ResizeSwapChainBitmap()
+    void resize_swapchain_bitmap()
     {
         m_target->SetTarget(nullptr);
 
@@ -206,15 +237,15 @@ struct SampleWindow :
             0))
         {
             create_swapchain_bitmap(m_swapChain, m_target);
-            CreateDeviceSizeResources();
+            create_device_size_resources();
         }
         else
         {
-            ReleaseDevice();
+            release_device();
         }
     }
 
-    static com_ptr<IDXGISwapChain1> CreateSwapChainForHwnd(com_ptr<ID3D11Device> const& device, HWND window)
+    static com_ptr<IDXGISwapChain1> create_swapchain(com_ptr<ID3D11Device> const& device, HWND window)
     {
         auto const factory = get_dxgi_factory(device);
 
@@ -237,23 +268,23 @@ struct SampleWindow :
         return swapChain;
     }
 
-    void Render()
+    void render()
     {
         if (!m_target)
         {
             auto device = create_device();
             m_target = create_render_target(m_factory, device);
-            m_swapChain = CreateSwapChainForHwnd(device, m_hWnd);
+            m_swapChain = create_swapchain(device, m_window);
             create_swapchain_bitmap(m_swapChain, m_target);
 
             m_target->SetDpi(m_dpi, m_dpi);
 
-            CreateDeviceResources();
-            CreateDeviceSizeResources();
+            create_device_resources();
+            create_device_size_resources();
         }
 
         m_target->BeginDraw();
-        Draw();
+        draw();
         m_target->EndDraw();
 
         auto const hr = m_swapChain->Present(1, 0);
@@ -264,24 +295,24 @@ struct SampleWindow :
         }
         else if (DXGI_STATUS_OCCLUDED == hr)
         {
-            check_hresult(m_dxfactory->RegisterOcclusionStatusWindow(m_hWnd, WM_USER, &m_occlusion));
+            check_hresult(m_dxfactory->RegisterOcclusionStatusWindow(m_window, WM_USER, &m_occlusion));
             m_visible = false;
         }
         else
         {
-            ReleaseDevice();
+            release_device();
         }
     }
 
-    void ReleaseDevice()
+    void release_device()
     {
         m_target = nullptr;
         m_swapChain = nullptr;
 
-        ReleaseDeviceResources();
+        release_device_resources();
     }
 
-    void Run()
+    void run()
     {
         m_factory = create_factory();
 
@@ -291,12 +322,9 @@ struct SampleWindow :
         float dpiY;
         m_factory->GetDesktopDpi(&m_dpi, &dpiY);
 
-        CreateDeviceIndependentResources();
+        create_device_independent_resources();
 
-        RECT bounds = { 10, 10, 1010, 750 };
-        check_bool(__super::Create(nullptr, bounds, L"Direct2D"));
-
-        check_bool(RegisterPowerSettingNotification(m_hWnd,
+        check_bool(RegisterPowerSettingNotification(m_window,
             &GUID_SESSION_DISPLAY_STATUS,
             DEVICE_NOTIFY_WINDOW_HANDLE));
 
@@ -306,7 +334,7 @@ struct SampleWindow :
         {
             if (m_visible)
             {
-                Render();
+                render();
 
                 while (PeekMessage(&message, nullptr, 0, 0, PM_REMOVE))
                 {
@@ -331,7 +359,7 @@ struct SampleWindow :
         }
     }
 
-    double GetTime() const
+    double get_time() const
     {
         LARGE_INTEGER time;
         check_bool(QueryPerformanceCounter(&time));
@@ -339,7 +367,7 @@ struct SampleWindow :
         return static_cast<double>(time.QuadPart) / m_frequency.QuadPart;
     }
 
-    void ScheduleAnimation()
+    void schedule_animation()
     {
         m_manager = create_instance<IUIAnimationManager>(__uuidof(UIAnimationManager));
         auto library = create_instance<IUIAnimationTransitionLibrary>(__uuidof(UIAnimationTransitionLibrary));
@@ -358,10 +386,10 @@ struct SampleWindow :
 
         check_hresult(m_manager->ScheduleTransition(m_variable.get(),
             transition.get(),
-            GetTime()));
+            get_time()));
     }
 
-    void CreateDeviceIndependentResources()
+    void create_device_independent_resources()
     {
         D2D1_STROKE_STYLE_PROPERTIES style = {};
         style.startCap = D2D1_CAP_STYLE_ROUND;
@@ -371,24 +399,24 @@ struct SampleWindow :
             nullptr, 0,
             m_style.put()));
 
-        ScheduleAnimation();
+        schedule_animation();
     }
 
-    void ReleaseDeviceResources()
+    void release_device_resources()
     {
         m_brush = nullptr;
         m_clock = nullptr;
         m_shadow = nullptr;
     }
 
-    void CreateDeviceResources()
+    void create_device_resources()
     {
         check_hresult(m_target->CreateSolidColorBrush(COLOR_ORANGE,
             BrushProperties(0.8f),
             m_brush.put()));
     }
 
-    void CreateDeviceSizeResources()
+    void create_device_size_resources()
     {
         auto sizeF = m_target->GetSize();
 
@@ -415,7 +443,7 @@ struct SampleWindow :
 
     }
 
-    void DrawClock()
+    void draw_clock()
     {
         auto size = m_target->GetSize();
         auto radius = std::max(200.0f, std::min(size.width, size.height)) / 2.0f - 50.0f;
@@ -478,11 +506,11 @@ struct SampleWindow :
             m_style.get());
     }
 
-    void Draw()
+    void draw()
     {
         m_orientation = Matrix3x2F::Identity();
         auto offset = SizeF(5.0f, 5.0f);
-        check_hresult(m_manager->Update(GetTime()));
+        check_hresult(m_manager->Update(get_time()));
 
         m_target->SetUnitMode(D2D1_UNIT_MODE_PIXELS);
         m_target->Clear(COLOR_WHITE);
@@ -493,7 +521,7 @@ struct SampleWindow :
 
         m_target->SetTarget(m_clock.get());
         m_target->Clear();
-        DrawClock();
+        draw_clock();
 
         m_target->SetTarget(previous.get());
         m_target->SetTransform(Matrix3x2F::Translation(offset));
@@ -529,6 +557,6 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
     init_apartment(apartment_type::single_threaded);
 
-    SampleWindow window;
-    window.Run();
+    Window window;
+    window.run();
 }

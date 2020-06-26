@@ -7,8 +7,6 @@
 #include <d3d11_1.h>
 #include <uianimation.h>
 #include <wincodec.h>
-#include <atlbase.h>
-#include <atlwin.h>
 #include <winrt/base.h>
 
 #pragma comment(lib, "d2d1")
