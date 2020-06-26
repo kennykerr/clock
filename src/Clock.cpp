@@ -510,6 +510,8 @@ struct SampleWindow :
     float m_dpi{};
     bool m_visible{};
     DWORD m_occlusion{};
+    LARGE_INTEGER m_frequency{};
+    D2D1_MATRIX_3X2_F m_orientation{};
 
     com_ptr<ID2D1Factory1> m_factory;
     com_ptr<IDXGIFactory2> m_dxfactory;
@@ -521,8 +523,6 @@ struct SampleWindow :
     com_ptr<ID2D1Bitmap1> m_clock;
     com_ptr<IUIAnimationManager> m_manager;
     com_ptr<IUIAnimationVariable> m_variable;
-    LARGE_INTEGER m_frequency;
-    D2D1_MATRIX_3X2_F m_orientation;
 };
 
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
