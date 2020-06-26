@@ -4,9 +4,6 @@ using namespace winrt;
 using namespace D2D1;
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
-struct __declspec(uuid("C67EA361-1863-4e69-89DB-695D3E9A5B6B")) Direct2DShadow;
-D2D1_COLOR_F const COLOR_WHITE = { 1.0f,  1.0f,  1.0f,  1.0f };
-D2D1_COLOR_F const COLOR_ORANGE = { 0.92f,  0.38f,  0.208f,  1.0f };
 
 com_ptr<ID2D1Factory1> create_factory()
 {
@@ -67,7 +64,6 @@ com_ptr<ID2D1DeviceContext> create_render_target(
 
     com_ptr<ID2D1Device> d2device;
     check_hresult(factory->CreateDevice(dxdevice.get(), d2device.put()));
-
     com_ptr<ID2D1DeviceContext> target;
 
     check_hresult(d2device->CreateDeviceContext(
@@ -80,10 +76,8 @@ com_ptr<ID2D1DeviceContext> create_render_target(
 com_ptr<IDXGIFactory2> get_dxgi_factory(com_ptr<ID3D11Device> const& device)
 {
     auto dxdevice = device.as<IDXGIDevice>();
-
     com_ptr<IDXGIAdapter> adapter;
     check_hresult(dxdevice->GetAdapter(adapter.put()));
-
     return capture<IDXGIFactory2>(adapter, &IDXGIAdapter::GetParent);
 }
 
@@ -106,6 +100,29 @@ void create_swapchain_bitmap(
     target->SetTarget(bitmap.get());
 }
 
+com_ptr<IDXGISwapChain1> create_swapchain(com_ptr<ID3D11Device> const& device, HWND window)
+{
+    auto const factory = get_dxgi_factory(device);
+
+    DXGI_SWAP_CHAIN_DESC1 props = {};
+    props.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    props.SampleDesc.Count = 1;
+    props.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    props.BufferCount = 2;
+    props.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+
+    com_ptr<IDXGISwapChain1> swapChain;
+
+    check_hresult(factory->CreateSwapChainForHwnd(device.get(),
+        window,
+        &props,
+        nullptr,
+        nullptr,
+        swapChain.put()));
+
+    return swapChain;
+}
+
 struct Window
 {
     HWND m_window{};
@@ -119,27 +136,20 @@ struct Window
         wc.style = CS_HREDRAW | CS_VREDRAW;
         wc.lpfnWndProc = window_proc;
         RegisterClass(&wc);
-        WINRT_ASSERT(!m_window);
 
-        WINRT_VERIFY(CreateWindow(wc.lpszClassName,
-            L"Sample",
+        CreateWindow(wc.lpszClassName,
+            L"Clock",
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-            nullptr, nullptr, wc.hInstance, this));
-
-        WINRT_ASSERT(m_window);
+            nullptr, nullptr, wc.hInstance, this);
     }
 
     static LRESULT __stdcall window_proc(HWND const window, UINT const message, WPARAM const wparam, LPARAM const lparam) noexcept
     {
-        WINRT_ASSERT(window);
-
         if (WM_NCCREATE == message)
         {
             auto cs = reinterpret_cast<CREATESTRUCT*>(lparam);
             auto that = static_cast<Window*>(cs->lpCreateParams);
-            WINRT_ASSERT(that);
-            WINRT_ASSERT(!that->m_window);
             that->m_window = window;
             SetWindowLongPtr(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(that));
         }
@@ -243,29 +253,6 @@ struct Window
         {
             release_device();
         }
-    }
-
-    static com_ptr<IDXGISwapChain1> create_swapchain(com_ptr<ID3D11Device> const& device, HWND window)
-    {
-        auto const factory = get_dxgi_factory(device);
-
-        DXGI_SWAP_CHAIN_DESC1 props = {};
-        props.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        props.SampleDesc.Count = 1;
-        props.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        props.BufferCount = 2;
-        props.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-
-        com_ptr<IDXGISwapChain1> swapChain;
-
-        check_hresult(factory->CreateSwapChainForHwnd(device.get(),
-            window,
-            &props,
-            nullptr,
-            nullptr,
-            swapChain.put()));
-
-        return swapChain;
     }
 
     void render()
@@ -411,7 +398,9 @@ struct Window
 
     void create_device_resources()
     {
-        check_hresult(m_target->CreateSolidColorBrush(COLOR_ORANGE,
+        constexpr D2D1_COLOR_F color_orange = { 0.92f,  0.38f,  0.208f,  1.0f };
+
+        check_hresult(m_target->CreateSolidColorBrush(color_orange,
             BrushProperties(0.8f),
             m_brush.put()));
     }
@@ -435,6 +424,8 @@ struct Window
             m_clock.put()));
 
         m_shadow = nullptr;
+
+        struct __declspec(uuid("C67EA361-1863-4e69-89DB-695D3E9A5B6B")) Direct2DShadow;
 
         check_hresult(m_target->CreateEffect(__uuidof(Direct2DShadow),
             m_shadow.put()));
@@ -513,7 +504,10 @@ struct Window
         check_hresult(m_manager->Update(get_time()));
 
         m_target->SetUnitMode(D2D1_UNIT_MODE_PIXELS);
-        m_target->Clear(COLOR_WHITE);
+
+        constexpr D2D1_COLOR_F color_white = { 1.0f,  1.0f,  1.0f,  1.0f };
+        m_target->Clear(color_white);
+
         m_target->SetUnitMode(D2D1_UNIT_MODE_DIPS);
 
         com_ptr<ID2D1Image> previous;
