@@ -130,14 +130,14 @@ struct Window
     Window()
     {
         WNDCLASS wc{};
-        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
         wc.hInstance = reinterpret_cast<HINSTANCE>(&__ImageBase);
         wc.lpszClassName = L"Sample";
         wc.style = CS_HREDRAW | CS_VREDRAW;
         wc.lpfnWndProc = window_proc;
-        RegisterClass(&wc);
+        RegisterClassW(&wc);
 
-        CreateWindow(wc.lpszClassName,
+        CreateWindowW(wc.lpszClassName,
             L"Clock",
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -151,14 +151,14 @@ struct Window
             auto cs = reinterpret_cast<CREATESTRUCT*>(lparam);
             auto that = static_cast<Window*>(cs->lpCreateParams);
             that->m_window = window;
-            SetWindowLongPtr(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(that));
+            SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(that));
         }
         else if (auto that = reinterpret_cast<Window*>(GetWindowLongPtr(window, GWLP_USERDATA)))
         {
             return that->message_handler(message, wparam, lparam);
         }
 
-        return DefWindowProc(window, message, wparam, lparam);
+        return DefWindowProcW(window, message, wparam, lparam);
     }
 
     LRESULT message_handler(UINT const message, WPARAM const wparam, LPARAM const lparam) noexcept
@@ -214,7 +214,7 @@ struct Window
 
             if (m_visible)
             {
-                PostMessage(m_window, WM_NULL, 0, 0);
+                PostMessageW(m_window, WM_NULL, 0, 0);
             }
 
             return TRUE;
@@ -234,7 +234,7 @@ struct Window
             return 0;
         }
 
-        return DefWindowProc(m_window, message, wparam, lparam);
+        return DefWindowProcW(m_window, message, wparam, lparam);
     }
 
     void resize_swapchain_bitmap()
@@ -323,18 +323,18 @@ struct Window
             {
                 render();
 
-                while (PeekMessage(&message, nullptr, 0, 0, PM_REMOVE))
+                while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
                 {
-                    DispatchMessage(&message);
+                    DispatchMessageW(&message);
                 }
             }
             else
             {
-                if (BOOL result = GetMessage(&message, 0, 0, 0))
+                if (BOOL result = GetMessageW(&message, 0, 0, 0))
                 {
                     if (-1 != result)
                     {
-                        DispatchMessage(&message);
+                        DispatchMessageW(&message);
                     }
                 }
             }
