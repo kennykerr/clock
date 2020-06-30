@@ -3,8 +3,6 @@
 using namespace winrt;
 using namespace D2D1;
 
-extern "C" IMAGE_DOS_HEADER __ImageBase;
-
 com_ptr<ID2D1Factory1> create_factory()
 {
     D2D1_FACTORY_OPTIONS fo = {};
@@ -131,7 +129,7 @@ struct Window
     {
         WNDCLASS wc{};
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-        wc.hInstance = reinterpret_cast<HINSTANCE>(&__ImageBase);
+        wc.hInstance = GetModuleHandleW(nullptr);
         wc.lpszClassName = L"Sample";
         wc.style = CS_HREDRAW | CS_VREDRAW;
         wc.lpfnWndProc = window_proc;
